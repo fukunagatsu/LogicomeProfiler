@@ -1,7 +1,7 @@
 #include "logicome_profiler.h"
 
 bool compare_node( const Node& left, const Node& right ) {
-  return(left.pv < right.pv);
+  return(left.pv > right.pv);
 }
 
 void LogicomeProfiler::Run(){
@@ -9,105 +9,212 @@ void LogicomeProfiler::Run(){
   CountElements();
   MakeLogicOccurrenceTensor();
   CalcLogFact();
-  FirstScreening();
-  SecondScreening();
+  if(_criteria == 0){
+    FirstScreeningForFWER();
+    SecondScreeningForFWER();
+  }else if(_criteria == 1){
+    CalcPVForFDR();
+  }
 }
 
-void LogicomeProfiler::SecondScreening(){
+void LogicomeProfiler::CalcPVForFDR(){
+  int N = _number_of_samples;
+  long long int count = 0;
+  long long int ne = _number_of_elements;
+  long long int max_size_count = 4*ne*(ne-1)*(ne-2);
+  long long int ignored_count[3] = {0};
+  double threshold = _alpha;
+  _fdr_result_vector.reserve(3);
+  
+  for(int i = 0; i < 3; i++){
+    vector<Node> temp_vector; temp_vector.reserve(10000);
+    _fdr_result_vector.push_back(temp_vector);
+  }
+  for(int c = 0; c < _number_of_elements; c++){
+    for(int a = 0; a < _number_of_elements; a++){
+      if(a!=c){
+	for(int b = 0; b < _number_of_elements; b++){
+	  if(b!=a && b!=c){
+	    for(int l = 1; l <=6; l++){
+	      if(l>=5 || a < b){
+		count++;
+		int x = _logic_occurrence_tensor[a][b][l];
+		int y = _count_vector[c];
+		int z = CountLogicOccurrence(a,b,c,l);
+		double prob[3] = {0.0}; 
+		prob[0] = CalcProb(x,y,z,N,threshold);
+		CalcProbSecondCondition(a,b,c,l,threshold,prob[1],prob[2]);
+
+		for(int i = 0; i < 3; i++){
+		  double temp = (double)max_size_count*log(max_size_count)/(max_size_count - ignored_count[i]);		 
+		  if(prob[i]*temp < threshold){
+		    Node new_node(a,b,c,l,prob[i]);
+		    _fdr_result_vector[i].push_back(new_node);
+		    
+		  }else{
+		    ignored_count[i]++;
+		  }
+		}
+
+		if(count%1000000 == 0){
+		  cout << count<< "/" << max_size_count << " " << _fdr_result_vector[0].size() << " " << _fdr_result_vector[1].size()
+		       << " " << _fdr_result_vector[2].size()<< endl;
+		}
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  }
+  
+  for(int i = 0 ; i < 3; i++){
+    sort(_fdr_result_vector[i].begin(), _fdr_result_vector[i].end(), compare_node);
+    
+    long long int denominator = _fdr_result_vector[i].size();
+    double prev_qv = 100;
+    for(vector<Node>::iterator it = _fdr_result_vector[i].begin(); it != _fdr_result_vector[i].end(); ++it){
+      it->pv = min(prev_qv, it->pv*((double)max_size_count*log(max_size_count)/denominator));
+      prev_qv = it->pv;
+      denominator--;
+    }
+
+    bool break_flag = false;
+    for(vector<Node>::iterator it = _fdr_result_vector[i].begin(); it != _fdr_result_vector[i].end(); ++it){
+      if(it->pv < threshold){
+	_fdr_result_vector[i].erase(_fdr_result_vector[i].begin(),it);
+	_fdr_result_vector[i].shrink_to_fit();
+	break_flag = true;
+	break;
+      }
+    }
+    if(!break_flag){
+      _fdr_result_vector[i].clear();
+      _fdr_result_vector[i].shrink_to_fit();
+    }
+    cout << _fdr_result_vector[i].size() << endl;
+  }
+  _fdr_result_map.resize(2);
+  for(int i = 1; i < 3; i++){
+    for(vector<Node>::iterator it = _fdr_result_vector[i].begin(); it != _fdr_result_vector[i].end(); ++it){
+      string temp_string = to_string(it->a)+" "+to_string(it->b)+" "+to_string(it->c)+" "+to_string(it->l);
+      _fdr_result_map[i-1].insert(make_pair(temp_string,it->pv));
+    }
+    _fdr_result_vector[i].clear();
+    _fdr_result_vector[i].shrink_to_fit();
+  }
+  
+
+  ofstream ofs(_output_file_name.c_str());
+  ofs << "significance_level " << threshold << endl;
+  ofs << "Logic_formula Qv_of_condition_a Qv_of_condition_b Qv_of_condition_c Logic_type"<< endl;
+  for(vector<Node>::iterator it = _fdr_result_vector[0].begin(); it != _fdr_result_vector[0].end(); ++it){
+    string temp_string = to_string(it->a)+" "+to_string(it->b)+" "+to_string(it->c)+" "+to_string(it->l);
+    if(_fdr_result_map[0].find(temp_string) != _fdr_result_map[0].end()
+       && _fdr_result_map[1].find(temp_string) != _fdr_result_map[1].end()){
+      
+      ofs << _name_vector[it->c] << "=" << _name_vector[it->a] << "," << _name_vector[it->b] << " " << it->pv << " "<< _fdr_result_map[0][temp_string] << " "<< _fdr_result_map[1][temp_string] << " " << it->l << endl;
+    }
+  }
+  ofs.close();
+}
+
+void LogicomeProfiler::CalcProbSecondCondition(int a,int b,int c,double logic,double threshold,double& prob2,double& prob3){
+  int x = _logic_occurrence_tensor[a][b][logic];
+  int y = _count_vector[c];
+  int z = CountLogicOccurrence(a,b,c,logic);
+   int N = _number_of_samples;
+   
+  if(logic == 1){
+    int w1 = _logic_occurrence_tensor[a][c][1];
+    int v1 = _count_vector[a];
+    prob2 = CalcProb(x,w1,z,v1,threshold);
+    
+    int w2 = _logic_occurrence_tensor[b][c][1];
+    int v2 = _count_vector[b];
+    prob3 = CalcProb(x,w2,z,v2,threshold);
+    
+  }else if(logic == 2){
+    
+    int r = _logic_occurrence_tensor[a][b][1];
+    int s1 = _logic_occurrence_tensor[a][c][5];
+    int t = r - CountLogicOccurrence(a,b,c,1);
+    int u1 =  _count_vector[a];
+    prob2 = CalcProb(r,s1,t,u1,threshold);
+    
+    int s2 = _logic_occurrence_tensor[b][c][5];
+    int u2 =  _count_vector[b];
+    prob3 = CalcProb(r,s2,t,u2,threshold);
+    
+  }else if(logic == 3){
+    
+    int r = _logic_occurrence_tensor[a][b][4];
+    int s1 = _logic_occurrence_tensor[a][c][4];
+    int t = r - CountLogicOccurrence(a,b,c,4);
+    int u1 =  _count_vector[a];
+    prob2 = CalcProb(r,s1,t,N-u1,threshold);
+    
+    int s2 = _logic_occurrence_tensor[b][c][4];
+    int u2 =  _count_vector[b];
+    prob3 = CalcProb(r,s2,t,N-u2,threshold);
+    
+  }else if(logic == 4){
+    
+    int w1 = _logic_occurrence_tensor[c][a][5];
+    int v1 = _count_vector[a];
+    prob2 = CalcProb(x,w1,z,N-v1,threshold);
+    
+    int w2 = _logic_occurrence_tensor[c][b][5];
+    int v2 = _count_vector[b];
+    prob3 = CalcProb(x,w2,z,N-v2,threshold);
+  }else if(logic == 5){
+    
+    int w1 = _logic_occurrence_tensor[a][c][1];
+    int v1 = _count_vector[a];
+    prob2 = CalcProb(x,w1,z,v1,threshold);
+    
+    int w2 = _logic_occurrence_tensor[c][b][5];
+    int v2 = _count_vector[b];
+    prob3 = CalcProb(x,w2,z,N-v2,threshold);
+    
+  }else if(logic == 6){
+    int r = _logic_occurrence_tensor[a][b][5];
+    int s1 = _logic_occurrence_tensor[a][c][5];
+    int t = r - CountLogicOccurrence(a,b,c,5);
+    int u1 =  _count_vector[a];
+    prob2 = CalcProb(r,s1,t,u1,threshold);
+    
+    int s2 = _logic_occurrence_tensor[b][c][4];
+    int u2 =  _count_vector[b];
+    prob3 = CalcProb(r,s2,t,N-u2,threshold);
+  }
+}
+
+void LogicomeProfiler::SecondScreeningForFWER(){
   int N = _number_of_samples;
   long long int ne = _number_of_elements;
   long long int max_size_count = 4*ne*(ne-1)*(ne-2); 
-  double bf_threshold = _alpha/max_size_count;
-  double threshold = _alpha/_result_vector.size();
+  double threshold = _alpha/max_size_count;
   ofstream ofs(_output_file_name.c_str());
-  ofs << "1st_significance_level" << bf_threshold << " 2nd_significance_level " << threshold << endl;
-  ofs << "Logic_formula Pv_of_condition_a Pv_of_condition_b Pv_of_condition_c p(c|l(a,b)) p(l(a,b)|c) Logic_type"<< endl;
+  ofs << "significance_level " << threshold << endl;
+  ofs << "Logic_formula Pv_of_condition_a Pv_of_condition_b Pv_of_condition_c Logic_type"<< endl;
   
   for(vector<Node>::iterator it = _result_vector.begin(); it != _result_vector.end(); ++it){    
     int a  = it->a;
     int b  = it->b;
     int c  = it->c;
     int logic = it->l;
-    
-    int x = _logic_occurrence_tensor[a][b][logic];
-    int y = _count_vector[c];
-    int z = CountLogicOccurrence(a,b,c,logic);
-    double prob2;
-    double prob3;
-    double es1 = (double)z/x;
-    double es2 = (double)z/y;
-    
-    if(logic == 1){
-      int w1 = _logic_occurrence_tensor[a][c][1];
-      int v1 = _count_vector[a];
-      prob2 = CalcProb(x,w1,z,v1,threshold);
-      
-      int w2 = _logic_occurrence_tensor[b][c][1];
-      int v2 = _count_vector[b];
-      prob3 = CalcProb(x,w2,z,v2,threshold);
-      
-    }else if(logic == 2){
-      
-      int r = _logic_occurrence_tensor[a][b][1];
-      int s1 = _logic_occurrence_tensor[a][c][5];
-      int t = r - CountLogicOccurrence(a,b,c,1);
-      int u1 =  _count_vector[a];
-      prob2 = CalcProb(r,s1,t,u1,threshold);
-      
-      int s2 = _logic_occurrence_tensor[b][c][5];
-      int u2 =  _count_vector[b];
-      prob3 = CalcProb(r,s2,t,u2,threshold);
-      
-    }else if(logic == 3){
-      
-      int r = _logic_occurrence_tensor[a][b][4];
-      int s1 = _logic_occurrence_tensor[a][c][4];
-      int t = r - CountLogicOccurrence(a,b,c,4);
-      int u1 =  _count_vector[a];
-      prob2 = CalcProb(r,s1,t,N-u1,threshold);
-      
-      int s2 = _logic_occurrence_tensor[b][c][4];
-      int u2 =  _count_vector[b];
-      prob3 = CalcProb(r,s2,t,N-u2,threshold);
-      
-    }else if(logic == 4){
-      
-      int w1 = _logic_occurrence_tensor[c][a][5];
-      int v1 = _count_vector[a];
-      prob2 = CalcProb(x,w1,z,N-v1,threshold);
-      
-      int w2 = _logic_occurrence_tensor[c][b][5];
-      int v2 = _count_vector[b];
-      prob3 = CalcProb(x,w2,z,N-v2,threshold);
-    }else if(logic == 5){
-      
-      int w1 = _logic_occurrence_tensor[a][c][1];
-      int v1 = _count_vector[a];
-      prob2 = CalcProb(x,w1,z,v1,threshold);
-      
-      int w2 = _logic_occurrence_tensor[c][b][5];
-      int v2 = _count_vector[b];
-      prob3 = CalcProb(x,w2,z,N-v2,threshold);
-      
-    }else if(logic == 6){
-      int r = _logic_occurrence_tensor[a][b][5];
-      int s1 = _logic_occurrence_tensor[a][c][5];
-      int t = r - CountLogicOccurrence(a,b,c,5);
-      int u1 =  _count_vector[a];
-      prob2 = CalcProb(r,s1,t,u1,threshold);
-      
-      int s2 = _logic_occurrence_tensor[b][c][4];
-      int u2 =  _count_vector[b];
-      prob3 = CalcProb(r,s2,t,N-u2,threshold);
-    }
+    double prob2 = 0.0;
+    double prob3 = 0.0;
+    CalcProbSecondCondition(a,b,c,logic,threshold,prob2,prob3);
 
     if(prob2 < threshold && prob3 < threshold){
-      ofs << _name_vector[c] << "=" << _name_vector[a] << "," << _name_vector[b] << " " << it->pv << " "<< prob2 << " "<< prob3 << " " << es1 << " " << es2 << " " << logic << endl;
+      ofs << _name_vector[c] << "=" << _name_vector[a] << "," << _name_vector[b] << " " << it->pv << " "<< prob2 << " "<< prob3 << " " << logic << endl;
     }
   }
 }
 
-void LogicomeProfiler::FirstScreening(){
+void LogicomeProfiler::FirstScreeningForFWER(){
   int N = _number_of_samples;
   
   long long int count = 0;
@@ -320,4 +427,6 @@ void LogicomeProfiler::ReadData(){
 void LogicomeProfiler::SetParameters(char* argv[]){
   _input_data_file_name = argv[1];
   _output_file_name = argv[2];
+  _criteria = atoi(argv[3]);
+  _alpha = atof(argv[4]);
 }

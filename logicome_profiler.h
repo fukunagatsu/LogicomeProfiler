@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 #include <math.h>
+#include <map>
 #include <algorithm>
 #include <stdlib.h>
 #include <string.h>
@@ -28,7 +29,8 @@ class LogicomeProfiler{
     _output_file_name = "";
     _number_of_samples = 0;
     _number_of_elements = 0;
-    _alpha = 0.05;
+    _criteria = 0;
+    _alpha = 0.0;
   }
   void SetParameters(char* argv[]);
   void Run();
@@ -38,10 +40,13 @@ class LogicomeProfiler{
   void CountElements();
   void CalcLogFact();
   void MakeLogicOccurrenceTensor();
-  void FirstScreening();
+  void FirstScreeningForFWER();
+  void SecondScreeningForFWER();
+  void CalcPVForFDR();
+  void CalcProbSecondCondition(int a,int b,int c,double logic,double threshold,double& prob2,double& prob3);
   int CountLogicOccurrence(int a, int b,int l);
   int CountLogicOccurrence(int a, int b, int c, int l);
-  void SecondScreening();
+  
   double CalcProb(int x, int y, int z, int N, double threshold);
   double CalcCombination(int x, int y);
   double max3(double x, double y, double z);
@@ -50,6 +55,8 @@ class LogicomeProfiler{
   vector<vector<bool> > _dataset;
   vector<int> _count_vector;
   vector<Node> _result_vector;
+  vector<vector<Node> > _fdr_result_vector;
+  vector<map<string,double> > _fdr_result_map;
   vector<double> _log_fact;
   vector<string> _name_vector;
   string _input_data_file_name;
@@ -58,6 +65,7 @@ class LogicomeProfiler{
   int _number_of_elements;
   double _alpha;
   int _iteration_number;
+  int _criteria;
 };
 
 #endif

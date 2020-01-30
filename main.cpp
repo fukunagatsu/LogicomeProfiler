@@ -1,7 +1,7 @@
 #include "logicome_profiler.h"
 
 int main(int argc, char* argv[]){
-  if(argc != 3){
+  if(argc != 5){
     cout << "The number of argument is invalid." << endl;
     exit(1);
   }

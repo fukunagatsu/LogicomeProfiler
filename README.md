@@ -12,7 +12,7 @@ If you would like to use the FWER and the FDR for the multiple testing criteria,
     ./LogicomeProfiler test_input.txt test_output.txt 0 0.05
 
 ## Input file format
-The number of samples and items are described in the first line. In the second line, the name of each sample is listed. After the third line, the presence of absence of each item in each sample is described.
+The number of samples and items are described in the first line. In the second line, the name of each sample is listed. After the third line, the presence or the absence of each item in each sample is described.
 
 ## Example of input file format
     3 5

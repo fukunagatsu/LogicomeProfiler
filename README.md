@@ -5,7 +5,7 @@ Logicome Profiler exhaustively detects statistically significant triplet logic r
 Version 1.1.0 (2020/01/30)
 
 ## Usage
-./LogicomeProfiler <input_file> <output_file> <input_file> <output_file> <controlling procedure> <familywise error rate or false discovery rate>
+./LogicomeProfiler <input_file> <output_file> <controlling procedure> <familywise error rate or false discovery rate> 
 
 If you would like to use the FWER and the FDR for the multiple testing criteria, please set the controlling procedure to 0 and 1, respectively. For example, when you would like to use the FWER criteria and set the significance level to 0.05, the command line is as follows:
 
